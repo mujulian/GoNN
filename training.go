@@ -1,0 +1,156 @@
+package main
+
+import (	
+	"fmt"
+	"math"
+	"math/rand"
+	"gonum.org/v1/gonum/mat"
+)
+
+// contains all the information that defines a trained neural network
+type neuralNet struct {
+	config neuralNetConfig
+	wHidden *mat.Dense
+	bHidden *mat.Dense
+	wOut	*mat.Dense
+	bOut	*mat.Dense
+}
+
+// defines the neural network architecture and learning parameters
+type neuralNetConfig struct {
+	inputNeurons  int
+	outputNeurons int
+	hiddenNeurons int
+	numEpochs	  int
+	learningRate  float64	
+}
+
+// initializes a new neural network
+func newNetwork(config neuralNetConfig) *neuralNet {
+	return &neuralNet{config: config}
+}
+
+
+// implements the sigmoid function (activation function of choice for backpropagation)
+func sigmoid(x float64) float64 {
+	return 1.0 / (1.0 + math.Exp(-x))
+}
+
+
+// implements the derivative of the sigmoid function for backpropagation
+func sigmoidPrime(x float64) float64 {
+	return sigmoid(x) * (1.0 - sigmoid(x))
+}
+
+
+// trains a neural network using backpropagation
+func (nn *neuralNet) train(x, y *mat.Dense) error {
+	// initialize biases/weights
+	randSource := rand.NewSource(time.Now().UnixNano())
+	randGen := rand.New(randSource)
+
+	wHidden := mat.NewDense(nn.config.inputNeurons, nn.config.hiddenNeurons, nil)
+	bHidden := mat.NewDense(1, nn.config.hiddenNeurons, nil)
+	wOut := mat.NewDense(nn.config.hiddenNeurons, nn.config.outputNeurons, nil)
+	bOut := mat.NewDense(1, nn.config.outputNeurons, nil)
+
+	wHiddenRaw := wHidden.RawMatrix().Data
+	bHiddenRaw := bHidden.RawMatrix().Data
+	wOutRaw := wOut.RawMatrix().Data
+	bOutRaw := bOut.RawMatrix().Data
+
+	for _, params := range [][]float64 {
+		wHidden,
+		bHiddenRaw,
+		wOutRaw,
+		bOutRaw,
+	} {
+		for i := range param {
+			param[i] = randGen.Float64()
+		}
+	}
+
+	// Define the output of the neural network
+	output := new(mat.Dense)
+
+	// Use backpropagation to adjust the weights and biases
+	if err := nn.backpropagate(x, y, wHidden, bHidden, wOut, bOut, output); err != nil {
+		return err
+	}
+
+	// Define the trained neural network
+	nn.wHidden = wHidden
+	nn.bHidden = bHidden
+	nn.wOut = wOut
+	nn.bOut = bOut
+	
+	return nil
+}
+
+
+// backpropagation method
+func (nn *neuralNet) backpropagate(x, y, wHidden, bHidden, wOut, bOut, output *mat.Dense) error {
+	// loop over the number of epochs utilizing backpropagation to train the model
+	for i := 0; i < nn.config.numEpochs; i++ {
+		// forward feed process
+		hiddenLayerInput := new(mat.Dense)
+		hiddenLayerInput.Mul(x, wHidden)
+		addBHidden := func(_, col int, v float64) float64 { return v + bHidden.At(0, col) }
+		hiddenLayerInput.Apply(addBHidden, hiddenLayerInput)
+
+		hiddenLayerActivations := new(mat.Dense)
+		applySigmoid := func(_, _ int, v float64) float64 { return sigmoid(v) }
+		hiddenLayerActivations.Apply(applySigmoid, hiddenLayerInput)
+
+		outputLayerInput := new(mat.Dense)
+		outputLayerInput.Mul(hiddenLayerActivations, wOut)
+		addBOut := func(_, col int, v float64) float64 { return v + bOut.At(0, col) }
+		outputLayerInput.Apply(addBout, outputLayerInput)
+		output.Apply(applySigmoid. outputLayerInput)
+
+		// complete the backpropagation
+		networkError := new(mat.Dense)
+		networkError.Sub(y, output)
+
+		slopeOutputLayer := new(mat.Dense)
+		applySigmoidPrime := func(_, _ int, v float64) float64 { return sigmoidPrime(v) }
+		slopeOutputLayer.Apply(applySigmoidPrime, output)
+		slopeHiddenLayer := new(mat.Dense)
+		slopeHiddenLayer.Apply(applySigmoidPrime, hiddenLayerActivations)
+
+		dOutput := new(mat.Dense)
+		dOutput.MulElem(networkError, slopeOutputLayer)
+		errorAtHiddenLayer := new(mat.Dense)
+		errorAtHiddenLayer.Mul(dOutput, wOut.T())
+
+		dHiddenLayer := new(mat.Dense)
+		dHiddenLayer.MulElem(errorAtHiddenLayer, slopeHiddenLayer)
+
+		// Adjust the parameters
+		wOutAdj := new(mat.Dense)
+		wOutAdj.Mul(hiddenLayerActivations.T(), dOutput)
+		wOutAdj.Scale(nn.config.learningRate, wOutAdj)
+		wOut.Add(wOut, wOutAdj)
+
+		bOutAdj, err := sumAlongAxis(0, dOutput)
+		if err != nil {
+			return err
+		}
+		bOutAdj.Scale(nn.config.llearningRate, bOutAdj)
+		bOut.Add(bOut, bOutAdj)
+
+		wHiddenAdj := new(mat.Dense)
+		wHiddenAdj.Mul(x.T(), dHiddenLayer)
+		wHiddenAdj.Scale(nn.config.learningRate, wHiddenAdj)
+		wHidden.Add(wHidden, wHiddenAdj)
+
+		bHiddenAdj,err := sumAlongAxis(0, dHiddenLayer)
+		if err != nil {
+			return err
+		}
+		bHiddenAdj.Scale(nn.config.learningRate, bHiddenAdj)
+		bHidden.Add(bHidden, bHiddenAdj)
+	}
+
+	return nil
+}
